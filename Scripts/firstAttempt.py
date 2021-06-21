@@ -64,7 +64,7 @@ def pipeline():
 
     # 5) transform target variable so that positive prediction implies that person does not recidivate and vice versa
     # (1 if does not recidivate, 0 if recidivates)
-    df.two_year_recid = 1-df.two_year_recid
+    df.two_year_recid = 1 - df.two_year_recid
 
     ##
     # y = 1 -> positive label -> does not recidivate

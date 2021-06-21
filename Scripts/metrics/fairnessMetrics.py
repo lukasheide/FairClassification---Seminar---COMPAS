@@ -48,7 +48,7 @@ class FairnessMetrics():
         self.prob_pos_pred_given_prot = (self.TP_prot + self.FP_prot) / self.n_prot
         self.prob_pos_pred_given_unprot = (self.TP_unprot + self.FP_unprot) / self.n_unprot
 
-        self.disparate_impact = self.prob_pos_pred_given_unprot / self.prob_pos_pred_given_prot
+        self.disparate_impact = self.prob_pos_pred_given_prot / self.prob_pos_pred_given_unprot
 
         return self.disparate_impact
 
