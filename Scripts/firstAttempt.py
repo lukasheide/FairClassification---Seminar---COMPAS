@@ -15,7 +15,7 @@ from Scripts.metrics.fairnessMetrics import FairnessMetrics, CausalDiscriminatio
 import pandas as pd
 
 
-def preprocessing():
+def pipeline():
     # import ProRepublica Recidivism Data:
     url = 'https://raw.githubusercontent.com/algofairness/fairness-comparison/80b34d25bb9b0387691c6cb8651f0e40edd262c8/fairness/data/preprocessed/propublica-recidivism_processed.csv'
 
@@ -55,15 +55,25 @@ def preprocessing():
     # 2) age-cat (one-hot encode: Greater than 45, 25-45, Less than 25)
     df = pd.get_dummies(df, prefix=['age_'], columns=['age_cat'], drop_first=True)
 
-    # 3) race (1 if african-american, 0 otherwise)
+    # 3) race (0 if african-american, 1 otherwise)
     df.race = (df['race'] == 'African-American').astype(int)
-
-    # transform target variable so that positive prediction (1) = does not recidivate and vice versa
-    df.race = 1-df.race
+    df.race = 1 - df.race
 
     # 4) c_charge_degree (1 if felony, 0 if misdemeanor)
     df.c_charge_degree = (df['c_charge_degree'] == 'F').astype(int)
 
+    # 5) transform target variable so that positive prediction implies that person does not recidivate and vice versa
+    # (1 if does not recidivate, 0 if recidivates)
+    df.two_year_recid = 1-df.two_year_recid
+
+    ##
+    # y = 1 -> positive label -> does not recidivate
+    # y = 0 -> negative label -> does recidivate
+    # s = 1 -> privileged class = unprotected class
+    # s = 0 -> unprivileged class = protected class
+
+    # => expectation: false negative rate higher in unprotected class compared to protected class
+    # -> P(Y_hat = 0 | Y = 1, S = 0) > P(Y_hat = 0 | Y = 1, S = 1)
 
 
     ### Normalization:
@@ -89,11 +99,6 @@ def preprocessing():
     x_test = test_set
     y_test = pd.DataFrame(test_set.pop(target), columns=[target])
 
-    # Cross Validation: todo use cross validation or not?
-    n_splits = 10
-    kfold = KFold(n_splits=n_splits,
-                  shuffle=True,
-                  random_state=seed)
 
     ##### Modelling Phase #####
 
@@ -115,7 +120,7 @@ def preprocessing():
     log_reg.metrics = {'correctness': {}, 'fairness': {}, 'efficiency': {}}
     ## Correctness:
 
-    log_reg.metrics['correctess'] = {
+    log_reg.metrics['correctness'] = {
         'accuracy': accuracy_score(y_test, y_pred_test),
         'precision': precision_score(y_test, y_pred_test),
         'recall': recall_score(y_test, y_pred_test),
@@ -144,4 +149,4 @@ def preprocessing():
 
 
 if __name__ == '__main__':
-    preprocessing()
+    pipeline()
