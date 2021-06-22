@@ -7,7 +7,6 @@ from sklearn.model_selection import KFold
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score
 from sklearn.model_selection import GridSearchCV, train_test_split
 from sklearn.compose import make_column_transformer
-
 from Scripts.metrics.fairnessMetrics import FairnessMetrics, CausalDiscrimination, compute_metrics
 
 from aif360.algorithms.preprocessing.optim_preproc_helpers.data_preproc_functions import load_preproc_data_adult, load_preproc_data_compas
@@ -28,9 +27,17 @@ def pipeline():
     ### https://github.com/Trusted-AI/AIF360/blob/master/examples/sklearn/demo_new_features.ipynb
 
     seed = 12345
+    sensitive_attr = 'race'
 
     # Import Dataset:
-    X, y = fetch_compas(usecols=['sex', 'race', 'age_cat', 'priors_count', 'c_charge_degree'], binary_race=True)
+    X, y = fetch_compas(binary_race=True)
+    # usecols=['sex', 'race', 'age_cat', 'priors_count', 'c_charge_degree']
+
+    ## Cleaning:
+    # Drop column:
+    # c_charge_desc (389 unique textual descriptions -> can not be properly used in quantitative analysis)
+    X = X.drop(['c_charge_desc'], axis=1)
+
 
     # Set multiclass-indizes:
     X.index = pd.MultiIndex.from_arrays(X.index.codes, names=X.index.names)
@@ -43,6 +50,17 @@ def pipeline():
     (X_train, X_test,
      y_train, y_test) = train_test_split(X, y, train_size=0.7, random_state=seed)
 
+    # Encode race: (0 if african-american, 1 otherwise)
+    X_train.race = 1 - (X_train['race'] == 'African-American').astype(int)
+    X_test.race = 1 - (X_test['race'] == 'African-American').astype(int)
+
+    # Change column order so that sensitive attribute is in first column. This is important for computing the metrics later on.
+    cols = X_train.columns.tolist()
+    cols = ['race'] + [col for col in cols if col!='race']
+    X_train = X_train[cols]
+    X_test = X_test[cols]
+
+
     # One-Hot-Encode categorical data:
     ohe = make_column_transformer(
         (OneHotEncoder(sparse=False, drop='first'), X_train.dtypes == 'category'),
@@ -52,17 +70,22 @@ def pipeline():
     X_test = pd.DataFrame(ohe.transform(X_test), index=X_test.index)
 
 
+    # Normalize data:
+    normalizer = MinMaxScaler()
+    X_train_normalized = normalizer.fit_transform(X_train)
+    X_test_normalized = normalizer.transform(X_test)
+
+    # Transform back into Pandas DataFrames:
+    X_train = pd.DataFrame(X_train_normalized, index=X_train.index, columns=X_train.columns)
+    X_test = pd.DataFrame(X_test_normalized, index=X_test.index, columns=X_test.columns)
 
 
     ### Baseline model ###
-    y_pred_baseline = LogisticRegression(solver='lbfgs').fit(X_train, y_train).predict(X_test)
+    log_reg = LogisticRegression(solver='lbfgs')
+    y_pred_baseline = pd.DataFrame(log_reg.fit(X_train, y_train).predict(X_test), index=y_test.index, columns=['y_pred_test'])
 
-    # Calculate Accuracy and DI:
-    acc_log_reg = accuracy_score(y_test, y_pred_baseline)
-    di_log_reg = disparate_impact_ratio(y_test, y_pred_baseline, prot_attr='race')
-
-    print('accuracy: ' + str(acc_log_reg))
-    print('disparate_impact: ' + str(di_log_reg))
+    compute_metrics(y_pred=y_pred_baseline, y_actual=y_test, x_test=X_test,
+                    model=log_reg, sensitive_attr=sensitive_attr, verbose=True)
 
 
     ### Preprocessing Algorithm ###
@@ -75,28 +98,26 @@ def pipeline():
     # print(clf.score(X_test, y_test))
     print(clf.best_params_)
 
-    y_pred_rew = clf.predict(X_test)
+    y_pred_rew = pd.DataFrame(clf.predict(X_test), index=y_test.index, columns=['y_pred_test'])
 
-    # Calculate Accuracy and DI:
-    acc_rew = accuracy_score(y_test, y_pred_rew)
-    di_rew = disparate_impact_ratio(y_test, y_pred_rew, prot_attr='race')
-
-    print('accuracy: ' + str(acc_rew))
-    print('disparate_impact: ' + str(di_rew))
-
+    compute_metrics(y_pred=y_pred_rew, y_actual=y_test, x_test=X_test,
+                    model=clf, sensitive_attr=sensitive_attr, verbose=True)
 
     ### Fair in-processing algorithm ###
-    adv_deb = AdversarialDebiasing(prot_attr='race', random_state=seed)
+    adv_deb = AdversarialDebiasing(prot_attr=sensitive_attr, random_state=seed)
     adv_deb.fit(X_train, y_train)
 
-    y_pred_adv_deb = adv_deb.predict(X_test)
+    y_pred_adv_deb = pd.DataFrame(adv_deb.predict(X_test), index=y_test.index, columns=['y_pred_test'])
 
     # Calculate Accuracy and DI:
     acc_adv = accuracy_score(y_test, y_pred_adv_deb)
-    di_adv = disparate_impact_ratio(y_test, y_pred_adv_deb, prot_attr='race')
+    di_adv = disparate_impact_ratio(y_test, y_pred_adv_deb, prot_attr=sensitive_attr)
 
     print('accuracy: ' + str(acc_adv))
     print('disparate_impact: ' + str(di_adv))
+
+    compute_metrics(y_pred=y_pred_adv_deb, y_actual=y_test, x_test=X_test,
+                    model=adv_deb, sensitive_attr=sensitive_attr, verbose=True)
 
     # close tensor-flow board
     adv_deb.sess_.close()
@@ -104,20 +125,15 @@ def pipeline():
 
 
     ### Fair post-processing algorithm ###
-    cal_eq_odds = CalibratedEqualizedOdds('race', cost_constraint='fnr', random_state=seed)
+    cal_eq_odds = CalibratedEqualizedOdds(sensitive_attr, cost_constraint='fnr', random_state=seed)
     log_reg = LogisticRegression(solver='lbfgs')
     postproc = PostProcessingMeta(estimator=log_reg, postprocessor=cal_eq_odds, random_state=seed)
 
     postproc.fit(X_train, y_train)
-    y_pred_eq_odds = postproc.predict(X_test)
+    y_pred_eq_odds = pd.DataFrame(postproc.predict(X_test), index=y_test.index, columns=['y_pred_test'])
 
-    # Calculate Accuracy and DI:
-    acc_eq_odds = accuracy_score(y_test, y_pred_eq_odds)
-    di_eq_odds = disparate_impact_ratio(y_test, y_pred_eq_odds, prot_attr='race')
-
-    print('accuracy: ' + str(acc_eq_odds))
-    print('disparate_impact: ' + str(di_eq_odds))
-
+    compute_metrics(y_pred=y_pred_eq_odds, y_actual=y_test, x_test=X_test,
+                    model=postproc, sensitive_attr=sensitive_attr, verbose=True)
 
     print('pipeline finished')
 
