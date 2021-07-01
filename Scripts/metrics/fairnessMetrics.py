@@ -1,5 +1,6 @@
 from sklearn.metrics import confusion_matrix
 import pandas as pd
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score
 
 
 class FairnessMetrics():
@@ -97,3 +98,62 @@ class CausalDiscrimination():
 
         # Divide absolute number of changes by total number of elements:
         return num_diff/len(x_test_swapped_sensitive_attr)
+
+
+
+def compute_metrics(y_pred, y_actual, x_test, sensitive_attr, model, verbose=True):
+    """
+    Computes
+    :param y_pred: predicted labels of target variable
+    :param y_actual: true labels of target variable
+    :param x_test: input variables for test_set
+    :param sensitive_attr: string describing the sensitive attribute (e.g. gender)
+    :param model: model to be evaluated (e.g. trained log regression model)
+    :return:
+    """
+
+    # Add dictionary containing metrics to model:
+    model.metrics = {'correctness': {}, 'fairness': {}, 'efficiency': {}}
+
+    ## Start by computing correctness metrics:
+    model.metrics['correctness'] = {
+        'accuracy': accuracy_score(y_pred, y_actual),
+        'precision': precision_score(y_pred, y_actual),
+        'recall': recall_score(y_pred, y_actual),
+        'f1': f1_score(y_pred, y_actual),
+        'auc': roc_auc_score(y_pred, y_actual)
+    }
+
+    # Print correctness results:
+    if verbose:
+        for key, value in model.metrics['correctness'].items():
+            print(key, ' : ', value)
+
+
+    ## Compute fairness metrics:
+    fair_metrics_obj = FairnessMetrics(y_pred=y_pred, y_actual=y_actual, x_test=x_test, sensitive_attr=sensitive_attr)
+
+    # 1) Disparate Impact:
+    di = fair_metrics_obj.disparate_impact()
+
+    # 2a) Positive Rate Balance:
+    tprb = fair_metrics_obj.true_positive_rate_balance()
+
+    # 2b) Negative Rate Balance:
+    tnrb = fair_metrics_obj.true_negative_rate_balance()
+
+    # 3 Causal discrimination:
+    cd_object = CausalDiscrimination(y_pred=y_pred, y_test=y_actual, x_test=x_test, sensitive_attr=sensitive_attr, model=model)
+    cd = cd_object.compute_causal_discrimination()
+
+    model.metrics['fairness'] = {
+        'disparate_impact': di,
+        'true_positive_rate_balance': tprb,
+        'true_negative_rate_balance': tnrb,
+        'causal_discrimination': cd
+    }
+
+    # Print fairness results:
+    if verbose:
+        for key, value in model.metrics['fairness'].items():
+            print(key, ' : ', value)

@@ -6,7 +6,13 @@ from sklearn.preprocessing import MinMaxScaler
 from sklearn.model_selection import KFold
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score
 
-from Scripts.metrics.fairnessMetrics import FairnessMetrics, CausalDiscrimination
+from Scripts.metrics.fairnessMetrics import FairnessMetrics, CausalDiscrimination, compute_metrics
+
+from aif360.algorithms.preprocessing.optim_preproc_helpers.data_preproc_functions import load_preproc_data_adult, load_preproc_data_compas
+from aif360.sklearn.inprocessing import AdversarialDebiasing
+from aif360.sklearn.postprocessing import CalibratedEqualizedOdds, PostProcessingMeta
+from aif360.algorithms.postprocessing import EqOddsPostprocessing
+from aif360.sklearn.datasets import fetch_adult, fetch_compas
 
 
 ### Import COMPAS data from Friedler repository: https://github.com/algofairness/fairness-comparison/blob/master/fairness/preprocess.py
@@ -84,6 +90,11 @@ def pipeline():
     # transform result back into dataframe:
     df_normalized = pd.DataFrame(df_normalized, index=df.index, columns=df.columns)
 
+    # add multi-index so that aif360 library can work with the data:
+    aif_360_compas_X, aif_360_compas_y = fetch_compas()
+    df_normalized.index = aif_360_compas_X.index
+
+
     ### Data Segregation:
     # split into train/test set:
     seed = 42
@@ -111,42 +122,47 @@ def pipeline():
     # get predictions:
     y_pred_test = pd.DataFrame(log_reg.predict(x_test), index=y_test.index, columns=['y_pred_test'])
 
-    # compute model accuracy:
-    result = {'Train_Score': log_reg.score(x_train, y_train),
-              'Held_Out_Score': log_reg.score(x_test, y_test)}
+    # Compute correctness and fairness metrics:
+    compute_metrics(y_pred=y_pred_test, y_actual=y_test, x_test=x_test,
+                    model=log_reg, sensitive_attr=sensitive_attr, verbose=True)
 
 
-    ### Compute metrics:
-    log_reg.metrics = {'correctness': {}, 'fairness': {}, 'efficiency': {}}
-    ## Correctness:
+    ##### In-Processing approaches:
 
-    log_reg.metrics['correctness'] = {
-        'accuracy': accuracy_score(y_test, y_pred_test),
-        'precision': precision_score(y_test, y_pred_test),
-        'recall': recall_score(y_test, y_pred_test),
-        'f1': f1_score(y_test, y_pred_test),
-        'auc': roc_auc_score(y_test, y_pred_test)
-    }
+    ### Zhang, Lemoine:
+    adv_deb = AdversarialDebiasing(prot_attr='race', random_state=seed)
 
-    ##  Fairness:
-    # 1) DI
-    fair_metrics = FairnessMetrics(y_pred=y_pred_test, y_actual=y_test, x_test=x_test, sensitive_attr=sensitive_attr)
+    adv_deb.fit(x_train, y_train)
 
-    di = fair_metrics.disparate_impact()
-    tprb = fair_metrics.true_positive_rate_balance()
-    tnrb = fair_metrics.true_negative_rate_balance()
+    adv_deb.score(x_test, y_test)
 
-    log_reg.metrics['fairness'] = {
-        'di':di,
-        'tprb':tprb,
-        'tnrb':tnrb
-    }
+    adv_deb_predictions = pd.DataFrame(adv_deb.predict(x_test), index=y_test.index, columns=['y_pred_test'])
 
-    cd = CausalDiscrimination(y_pred=y_pred_test, y_test=y_test, x_test=x_test, sensitive_attr=sensitive_attr, model=log_reg)
-    cd.compute_causal_discrimination()
+
+    # Compute correctness and fairness metrics:
+    compute_metrics(y_pred=adv_deb_predictions, y_actual=y_test, x_test=x_test,
+                    model=adv_deb, sensitive_attr=sensitive_attr, verbose=True)
+
+
+    # AdversarialDebiasing creates a TensorFlow session which we should be closed when finished:
+    # https://github.com/Trusted-AI/AIF360/blob/master/examples/sklearn/demo_new_features.ipynb
+    adv_deb.sess_.close()
+
+
+    ##### Post-processing approaches:
+
+    ### Hardt:
+
+
+
+
+
 
     print('end reached')
 
 
 if __name__ == '__main__':
+    import tensorflow as tf
+    tf.compat.v1.disable_eager_execution()
+
     pipeline()
