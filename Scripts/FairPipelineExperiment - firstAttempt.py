@@ -116,6 +116,7 @@ def pipeline():
     ### Baseline model: Logistic regression
     log_reg = LogisticRegression()
 
+
     # train model on training data:
     log_reg.fit(x_train, y_train)
 
@@ -131,6 +132,7 @@ def pipeline():
 
     ### Zhang, Lemoine:
     adv_deb = AdversarialDebiasing(prot_attr='race', random_state=seed)
+
 
     adv_deb.fit(x_train, y_train)
 
@@ -151,9 +153,30 @@ def pipeline():
 
     ##### Post-processing approaches:
 
+    ### Pleis
+
+
+
+
     ### Hardt:
 
+    cal_eq_odds = CalibratedEqualizedOdds('race', cost_constraint='fnr', random_state=seed)
+    log_reg_hardt = LogisticRegression(solver='lbfgs')
 
+
+    # Post-processor needs to be trained on data unseen by the original estimator. The PostProcessingMeta class
+    # splits the data and trains the estimator and post-processor with their own split.
+    postproc = PostProcessingMeta(estimator=log_reg_hardt, postprocessor=cal_eq_odds)
+
+    postproc.fit(x_train, y_train)
+
+    # Get predictions:
+    cal_eq_predictions = pd.DataFrame(postproc.predict(x_test), index=y_test.index, columns=['y_pred_test'])
+
+
+    # Compute correctness and fairness metrics:
+    compute_metrics(y_pred=cal_eq_predictions, y_actual=y_test, x_test=x_test,
+                    model=cal_eq_odds, sensitive_attr=sensitive_attr, verbose=True)
 
 
 

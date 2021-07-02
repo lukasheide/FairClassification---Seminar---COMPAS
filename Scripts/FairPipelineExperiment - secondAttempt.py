@@ -23,6 +23,38 @@ import pandas as pd
 
 
 def pipeline():
+    """
+    FairClassificationPipeline consisting of three steps:
+    1) Preprocessing:
+    - We start by fetching the COMPAS dataset from the AIF360 library
+    - We then clean the data and rop columns that are not used in training
+    - We define race as the sensitive attribute and choose African-american as the unprivileged group
+    - We also split the dataset into training and test data choosing recidivism within two years as the target variable
+    - and normalize the input data to ensure that all attributes are equally important during training
+
+    2) Modelling + Evaluation:
+    - We then create four models which we train on the trainset:
+        - Logistic Regression (Baseline model)
+        - Reweighing (Pre-processing)
+        - Adversarial Debiasing (In-processing)
+        - Calibrated Equalized Odds (Post-processing)
+    - We use the models for which the AIF360-Scikit API had already been implemented before July 2021.
+
+    - We then evaluate the results on the following metrics:
+        - Correctness:
+            - Accuracy
+            - Precision
+            - Recall
+            - F1-Score
+            - AUC
+        - Fairness:
+            - Disparate Impact
+            - True Positive Rate Balance
+            - True Negative Rate Balance
+            - Causal Discrimination
+
+    :return:
+    """
 
     ### https://github.com/Trusted-AI/AIF360/blob/master/examples/sklearn/demo_new_features.ipynb
 
@@ -39,7 +71,7 @@ def pipeline():
     X = X.drop(['c_charge_desc'], axis=1)
 
 
-    # Set multiclass-indizes:
+    # Set multiclass-indizes (requirement of the AIF360 library in later steps):
     X.index = pd.MultiIndex.from_arrays(X.index.codes, names=X.index.names)
     y.index = pd.MultiIndex.from_arrays(y.index.codes, names=y.index.names)
 
@@ -82,6 +114,8 @@ def pipeline():
 
     ### Baseline model ###
     log_reg = LogisticRegression(solver='lbfgs')
+    log_reg.name = 'Logistic Regression'
+
     y_pred_baseline = pd.DataFrame(log_reg.fit(X_train, y_train).predict(X_test), index=y_test.index, columns=['y_pred_test'])
 
     compute_metrics(y_pred=y_pred_baseline, y_actual=y_test, x_test=X_test,
@@ -91,11 +125,13 @@ def pipeline():
     ### Preprocessing Algorithm ###
     rew = ReweighingMeta(estimator=LogisticRegression(solver='lbfgs'))
 
-    params = {'estimator__C': [1, 10], 'reweigher__prot_attr': ['race']}
+    params = {'estimator__C': [1,3,5,7,10], 'reweigher__prot_attr': ['race']}
 
     clf = GridSearchCV(rew, params, scoring='accuracy', cv=5)
+    clf.name = 'Reweighing Algorithm'
+
     clf.fit(X_train, y_train)
-    # print(clf.score(X_test, y_test))
+    # print(clf.score(X_test, y_test))  
     print(clf.best_params_)
 
     y_pred_rew = pd.DataFrame(clf.predict(X_test), index=y_test.index, columns=['y_pred_test'])
@@ -105,16 +141,11 @@ def pipeline():
 
     ### Fair in-processing algorithm ###
     adv_deb = AdversarialDebiasing(prot_attr=sensitive_attr, random_state=seed)
+    adv_deb.name = 'Adversarial Debiasing'
+
     adv_deb.fit(X_train, y_train)
 
     y_pred_adv_deb = pd.DataFrame(adv_deb.predict(X_test), index=y_test.index, columns=['y_pred_test'])
-
-    # Calculate Accuracy and DI:
-    acc_adv = accuracy_score(y_test, y_pred_adv_deb)
-    di_adv = disparate_impact_ratio(y_test, y_pred_adv_deb, prot_attr=sensitive_attr)
-
-    print('accuracy: ' + str(acc_adv))
-    print('disparate_impact: ' + str(di_adv))
 
     compute_metrics(y_pred=y_pred_adv_deb, y_actual=y_test, x_test=X_test,
                     model=adv_deb, sensitive_attr=sensitive_attr, verbose=True)
@@ -128,6 +159,7 @@ def pipeline():
     cal_eq_odds = CalibratedEqualizedOdds(sensitive_attr, cost_constraint='fnr', random_state=seed)
     log_reg = LogisticRegression(solver='lbfgs')
     postproc = PostProcessingMeta(estimator=log_reg, postprocessor=cal_eq_odds, random_state=seed)
+    postproc.name = 'Calibrated Equalized Odds'
 
     postproc.fit(X_train, y_train)
     y_pred_eq_odds = pd.DataFrame(postproc.predict(X_test), index=y_test.index, columns=['y_pred_test'])

@@ -11,8 +11,8 @@ class FairnessMetrics():
         self.sensitive_attr = sensitive_attr
 
         # Extract indices of protected and unprotected class:
-        self.indices_protected = x_test.index[x_test[sensitive_attr] == 0].tolist()
-        self.indices_unprotected = x_test.index[x_test[sensitive_attr] == 1].tolist()
+        self.indices_protected = x_test.index[x_test[0] == 0].tolist()
+        self.indices_unprotected = x_test.index[x_test[0] == 1].tolist()
 
         # Count number of elements in both classes:
         self.n_prot = len(self.indices_protected)
@@ -83,7 +83,7 @@ class CausalDiscrimination():
         x_test_swapped_sensitive_attr = self.x_test.copy()
 
         # Swap values of sensitive attribute in x_test:
-        x_test_swapped_sensitive_attr[self.sensitive_attr] = 1 - x_test_swapped_sensitive_attr[self.sensitive_attr]
+        x_test_swapped_sensitive_attr[0] = 1 - x_test_swapped_sensitive_attr[0]
 
         # Get new predictions:
         self.new_predictions = pd.DataFrame(self.model.predict(x_test_swapped_sensitive_attr),
@@ -126,8 +126,11 @@ def compute_metrics(y_pred, y_actual, x_test, sensitive_attr, model, verbose=Tru
 
     # Print correctness results:
     if verbose:
+        if model.name:
+            print('Evaluated model: ' + model.name)
         for key, value in model.metrics['correctness'].items():
             print(key, ' : ', value)
+
 
 
     ## Compute fairness metrics:
@@ -157,3 +160,4 @@ def compute_metrics(y_pred, y_actual, x_test, sensitive_attr, model, verbose=Tru
     if verbose:
         for key, value in model.metrics['fairness'].items():
             print(key, ' : ', value)
+    print('\n')
