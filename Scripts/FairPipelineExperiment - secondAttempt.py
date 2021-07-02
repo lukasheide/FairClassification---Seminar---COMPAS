@@ -53,6 +53,12 @@ def pipeline():
             - True Negative Rate Balance
             - Causal Discrimination
 
+    - We use the SKLearn Library to compute the correctness metrics and implemented the fairness notions ourself.
+    - Unfortunately the methods we wanted to use are not available in the AIF360-Sklearn API or the results do not fit
+    the results of the benchmarking studies used in our thesis.
+    - We therefore suggest to wait for the execution of our experiment until the AIF360-Sklearn API is in a more mature
+    state and includes the approaches and fairness metrics that we want to use for our experiment.
+
     :return:
     """
 
