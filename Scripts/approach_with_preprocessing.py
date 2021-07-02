@@ -16,30 +16,24 @@ import pandas as pd
 
 
 def pipeline():
-    url = 'https://raw.githubusercontent.com/algofairness/fairness-comparison/80b34d25bb9b0387691c6cb8651f0e40edd262c8/fairness/data/preprocessed/propublica-recidivism_processed.csv'
-
-    data_raw = pd.read_csv(url)
     import aif360.algorithms.preprocessing.disparate_impact_remover
     import aif360.algorithms.preprocessing.lfr
     from aif360 import datasets
-    data_raw = pd.read_csv(url)
     dis_im_rem = aif360.algorithms.preprocessing.disparate_impact_remover.DisparateImpactRemover(
         repair_level=1.0, sensitive_attribute='race')
 
-
+    # Import of COMPAS dataset
     data_raw = datasets.CompasDataset(label_name='two_year_recid', favorable_classes=[0], protected_attribute_names=['race'], privileged_classes=[['Caucasian']], instance_weights_name=None, categorical_features=['age_cat', 'c_charge_degree', 'c_charge_desc'], features_to_keep=['sex','age', 'age_cat', 'juv_fel_count', 'juv_misd_count', 'juv_other_count', 'priors_count', 'c_charge_degree', 'c_charge_desc', 'two_year_recid'], features_to_drop=['sex'], na_values=[], metadata={'label_maps': [{1.0: 'Did recid.', 0.0: 'No recid.'}], 'protected_attribute_maps': [{1.0: 'Caucasian', 0.0: 'American'}]})
-    #
 
-    #apply disparateImpactRemover
+    # Apply disparateImpactRemover
     data_raw = dis_im_rem.fit_transform(data_raw)
-    data_raw = data_raw.convert_to_dataframe()[0]
+    df = data_raw.convert_to_dataframe()[0]
+
     ### Cleaning:
     # Drop columns:
     # 1) c_charge_desc (389 unique textual descriptions -> can not be used in quantitative analysis)
     # 2) decile_score, score_text -> both are result columns of what the actual COMPAS algorithm predicted
     # 3) sex-race -> combination of sex and race which is not used in our analysis
-    #df = data_raw[['age', 'race', 'juv_fel_count', 'two_year_recid', 'juv_misd_count', 'juv_other_count','priors_count']].copy()
-    df=data_raw
     df.drop(['two_year_recid'],axis=1)
 
     # Target variable: two_year_recid
